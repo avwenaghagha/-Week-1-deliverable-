@@ -1,0 +1,6 @@
+ETL Run Results:
+
+🚀 Starting SanTrack ETL Pipeline...
+Extracted 1 pending inspections
+Calculated risk scores: {'HIGH': 1}
+✅ ETL Pipeline completed successfully!
