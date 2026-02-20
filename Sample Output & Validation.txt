@@ -1,0 +1,10 @@
+ Sample Output & Validation
+Risk Score Example:
+Checklist: {"handwashing": False, "pests": True, "waste_disposal": False, "stagnant_water": True}
+Raw Score: 35 → Normalized: 8.75 (HIGH RISK)
+Factors: {
+  "handwashing": {"present": false, "score": 5},
+  "pests": {"present": true, "score": 10},
+  "stagnant_water": {"present": true, "score": 12}
+}
+
