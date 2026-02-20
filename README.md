@@ -2,47 +2,4 @@
 for my SanTrack responsibilities. This covers DB Schema + ETL Script + Risk Scoring—polished, tested, and documented for data science/engineering part.
 Week 1 Deliverable - Diana Avwenaghagha (WTF/2025/5018)
 Data Science & Engineering Track
-SanTrack: Digital Sanitation Monitoring Platform
--- Enable PostGIS extension for geospatial features
-
-
-
-CREATE EXTENSION IF NOT EXISTS postgis;
-
--- Core Inspections Table (Sanitation Officer Data)
-CREATE TABLE inspections (
-    id SERIAL PRIMARY KEY,
-    officer_id VARCHAR(50) NOT NULL,
-    location GEOGRAPHY(POINT, 4326),
-    photos JSONB,  -- Array of photo URLs/base64
-    checklist JSONB NOT NULL,  -- {"handwashing": false, "pests": true}
-    risk_score FLOAT CHECK (risk_score >= 0 AND risk_score <= 10),
-    status VARCHAR(20) DEFAULT 'completed',
-    timestamp TIMESTAMPTZ DEFAULT NOW(),
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Citizen Reports Table
-CREATE TABLE citizen_reports (
-    id SERIAL PRIMARY KEY,
-    reporter_id VARCHAR(50),  -- Anonymized hash
-    location GEOGRAPHY(POINT, 4326),
-    description TEXT,
-    photo_url TEXT,
-    cluster_id INTEGER,
-    status VARCHAR(20) DEFAULT 'open',
-    timestamp TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Risk Scoring Audit Log
-CREATE TABLE risk_audit (
-    id SERIAL PRIMARY KEY,
-    inspection_id INTEGER REFERENCES inspections(id),
-    raw_score FLOAT,
-    factors JSONB,  -- Risk calculation breakdown
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Index for performance
-CREATE INDEX idx_inspections_location ON inspections USING GIST(location);
-CREATE INDEX idx_reports_location ON citizen_reports USING GIST(location);
+SanTrack: Digital Sanitation Monitoring Platform.
