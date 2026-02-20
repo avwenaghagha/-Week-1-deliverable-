@@ -1,0 +1,118 @@
+ETL Pipeline + Risk Scoring (Python)
+
+import pandas as pd
+import psycopg2
+from sqlalchemy import create_engine
+import json
+from datetime import datetime, timedelta
+import numpy as np
+from typing import Dict, Any
+
+class SanTrackETL:
+    def __init__(self, db_url: str):
+        self.engine = create_engine(db_url)
+        self.risk_weights = {
+            'handwashing': -5,      # Present = low risk
+            'pests': 10,
+            'waste_disposal': 8,
+            'stagnant_water': 12,
+            'rodents': 15,
+            'blocked_drain': 10
+        }
+    
+    def calculate_risk_score(self, checklist: Dict[str, bool]) -> float:
+        """Rule-based risk scoring (0-10 scale)"""
+        score = 0
+        factors = {}
+        
+        for factor, weight in self.risk_weights.items():
+            present = checklist.get(factor, False)
+            factor_score = weight * (0 if present else 1)
+            score += factor_score
+            factors[factor] = {'present': present, 'score': factor_score}
+        
+        normalized_score = min(max(score / 20, 0), 10)  # Scale to 0-10
+        return round(normalized_score, 2), factors
+    
+    def extract_pending_inspections(self):
+        """Extract unsynced mobile data (mock - from mobile sync)"""
+        query = """
+        SELECT * FROM inspections 
+        WHERE risk_score IS NULL OR status = 'pending'
+        """
+        return pd.read_sql(query, self.engine)
+    
+    def transform_and_score(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Transform + calculate risk scores"""
+        scored_data = []
+        
+        for _, row in df.iterrows():
+            checklist = row['checklist']
+            risk_score, factors = self.calculate_risk_score(checklist)
+            
+            scored_data.append({
+                'id': row['id'],
+                'officer_id': row['officer_id'],
+                'location': row['location'],
+                'risk_score': risk_score,
+                'risk_category': self.get_risk_category(risk_score),
+                'factors': factors
+            })
+        
+        return pd.DataFrame(scored_data)
+    
+    def get_risk_category(self, score: float) -> str:
+        if score >= 7: return 'HIGH'
+        elif score >= 4: return 'MEDIUM'
+        else: return 'LOW'
+    
+    def load_risk_scores(self, scored_df: pd.DataFrame):
+        """Update database with scores"""
+        scored_df.to_sql('risk_updates', self.engine, if_exists='append', index=False)
+        
+        update_query = """
+        UPDATE inspections i
+        SET risk_score = ru.risk_score,
+            status = 'scored'
+        FROM risk_updates ru
+        WHERE i.id = ru.id
+        """
+        with self.engine.connect() as conn:
+            conn.execute(update_query)
+            conn.commit()
+    
+    def run_etl(self):
+        """Complete ETL pipeline"""
+        print("🚀 Starting SanTrack ETL Pipeline...")
+        
+        # Extract
+        raw_data = self.extract_pending_inspections()
+        print(f"Extracted {len(raw_data)} pending inspections")
+        
+        # Transform + Score
+        scored_data = self.transform_and_score(raw_data)
+        print(f"Calculated risk scores: {scored_data['risk_category'].value_counts().to_dict()}")
+        
+        # Load
+        self.load_risk_scores(scored_data)
+        print("✅ ETL Pipeline completed successfully!")
+
+# Usage
+if __name__ == "__main__":
+    # Replace with your DB connection string
+    etl = SanTrackETL("postgresql://user:pass@localhost/santrack")
+    
+    # Test data insertion (mock mobile sync)
+    test_inspection = {
+        'officer_id': 'OFF001',
+        'location': 'POINT(6.5244 3.3792)',  # Lagos coords
+        'checklist': {
+            'handwashing': False,
+            'pests': True,
+            'waste_disposal': False,
+            'stagnant_water': True
+        }
+    }
+    
+    # Insert test data then run ETL
+    etl.run_etl()
