@@ -1,0 +1,128 @@
+Python ETL for SQL Server
+
+import pandas as pd
+import pyodbc  # Use for SQL Server
+import json
+from datetime import datetime
+import numpy as np
+
+class SanTrackETL:
+    def __init__(self, conn_str: str):
+        self.conn_str = conn_str
+        self.risk_weights = {
+            'handwashing': -5, 'pests': 10, 'waste_disposal': 8,
+            'stagnant_water': 12, 'rodents': 15, 'blocked_drain': 10
+        }
+    
+    def calculate_risk_score(self, checklist_str: str) -> tuple:
+        """Parse JSON checklist → calculate risk"""
+        checklist = json.loads(checklist_str)
+        score = 0
+        factors = {}
+        
+        for factor, weight in self.risk_weights.items():
+            present = checklist.get(factor, False)
+            factor_score = weight * (0 if present else 1)
+            score += factor_score
+            factors[factor] = {'present': present, 'score': factor_score}
+        
+        normalized = min(max(score / 20, 0), 10)
+        return round(normalized, 2), json.dumps(factors)
+    
+    def insert_test_data(self):
+        """Insert sample inspection for testing"""
+        conn = pyodbc.connect(self.conn_str)
+        cursor = conn.cursor()
+        
+        # Lagos coordinates: POINT(3.3792 6.5244)
+        location = "0xE6100000010C..."  # Use geography::Point(lat, lon, 4326)
+        
+        cursor.execute("""
+            INSERT INTO inspections (officer_id, location, checklist)
+            VALUES (?, geography::Point(6.5244, 3.3792, 4326), ?)
+        """, ('OFF001', json.dumps({
+            'handwashing': False,
+            'pests': True,
+            'waste_disposal': False,
+            'stagnant_water': True
+        })))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("✅ Test data inserted")
+    
+    def run_etl(self):
+        """Complete ETL pipeline"""
+        print("🚀 SanTrack SQL Server ETL Starting...")
+        
+        # Extract pending inspections
+        conn = pyodbc.connect(self.conn_str)
+        df = pd.read_sql("""
+            SELECT id, officer_id, checklist 
+            FROM inspections 
+            WHERE risk_score IS NULL
+        """, conn)
+        conn.close()
+        
+        print(f"📥 Extracted {len(df)} pending inspections")
+        
+        if len(df) == 0:
+            print("No pending data - run insert_test_data() first!")
+            return
+        
+        # Transform + Score
+        results = []
+        for _, row in df.iterrows():
+            risk_score, factors = self.calculate_risk_score(row['checklist'])
+            category = 'HIGH' if risk_score >= 7 else 'MEDIUM' if risk_score >= 4 else 'LOW'
+            
+            results.append({
+                'id': row['id'],
+                'risk_score': risk_score,
+                'risk_category': category,
+                'factors': factors
+            })
+        
+        scored_df = pd.DataFrame(results)
+        print(f"⚡ Scores: {scored_df['risk_category'].value_counts().to_dict()}")
+        
+        # Load back to DB
+        conn = pyodbc.connect(self.conn_str)
+        cursor = conn.cursor()
+        
+        for _, row in scored_df.iterrows():
+            cursor.execute("""
+                UPDATE inspections 
+                SET risk_score = ?, status = 'scored'
+                WHERE id = ?
+            """, (row['risk_score'], row['id']))
+        
+        # Log to audit
+        for _, row in scored_df.iterrows():
+            cursor.execute("""
+                INSERT INTO risk_audit (inspection_id, raw_score, factors)
+                VALUES (?, ?, ?)
+            """, (row['id'], row['risk_score'], row['factors']))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        print("✅ ETL Pipeline COMPLETED!")
+        print(f"🏆 Sample Result: ID {scored_df.iloc[0]['id']} → {scored_df.iloc[0]['risk_score']} ({scored_df.iloc[0]['risk_category']})")
+
+# RUN THIS:
+if __name__ == "__main__":
+    # Your SQL Server connection string
+    CONNECTION_STR = (
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        "SERVER=your_server;"
+        "DATABASE=santrack;"
+        "UID=your_user;"
+        "PWD=your_password"
+    )
+    
+    etl = SanTrackETL(CONNECTION_STR)
+    etl.insert_test_data()  # Add test data
+    etl.run_etl()           # Run ETL
